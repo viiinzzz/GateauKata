@@ -36,7 +36,7 @@ public class Prod
         {
             printStatus();
             await Task.Delay(10000);
-            secondLapse++;
+            secondLapse += 10;
         }
 
         printStatus();
