@@ -1,12 +1,14 @@
 ﻿namespace GateauKata;
 
-public interface IOperation
+public interface IStartable
 {
-    public IPrintable Target { get; init; }
-    IDuration Duration { get; init; }
-    public Action Done { get; init; }
     bool IsStarted { get; }
     bool Start(object sender);
+}
+public interface IOperation : IStartable
+{
+    IDuration Duration { get; init; }
 
+    event StartedEventHandler WhenStarted;
     event DoneEventHandler WhenDone;
 }

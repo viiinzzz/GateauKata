@@ -2,13 +2,15 @@
 
 public interface ICook : ILogger, IStatus
 {
-    void Work();
+    Task Work();
     bool HasWork { get; }
 
-    ICapacity prepareCapacity { get; init; }
-    ICapacity bakeCapacity { get; init; }
-    ICapacity wrapCapacity { get; init; }
-    int PieTodoCount { get; init; }
+    IPieConfig PieConfig { get;  }
+    ICapacity PrepareCapacity { get; }
+    ICapacity BakeCapacity { get; }
+    ICapacity WrapCapacity { get; }
+
+    int PieTodoCount { get; }
 }
 
 public interface ILogger

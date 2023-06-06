@@ -1,4 +1,6 @@
-﻿namespace GateauKata;
+﻿using System.Diagnostics;
+
+namespace GateauKata;
 
 public class Capacity : ICapacity
 {
@@ -7,7 +9,7 @@ public class Capacity : ICapacity
         Nominal = nominal;
         Current = nominal;
     }
-
+    
     public int Nominal { get; init; }
     public int Current { get; private set; }
     
@@ -15,29 +17,37 @@ public class Capacity : ICapacity
     public bool IsFull => Current >= Nominal;
 
 
-    public event AvailableEventHandler? Available;
+    public event ConsumeEventHandler? WhenConsumed;
+    public event ReleaseEventHandler? WhenReleased;
 
-    public bool Consume(object sender)
+    public bool Consume(object sender, IStatus consumer)
     {
-        if (!IsAvailable)
+        lock (this)
         {
-            return false;
-        }
+            if (!IsAvailable)
+            {
+                return false;
+            }
 
-        Current--;
-        return true;
+            Current--;
+            WhenConsumed?.Invoke(sender, new ConsumeEventArgs(consumer));
+            return true;
+        }
     }
 
-    public void Release(object sender)
+    public bool Release(object sender, IStatus consumer)
     {
-        if (IsFull)
+        lock (this)
         {
-            throw new CapacityFullException();
+            if (IsFull)
+            {
+                return false;
+            }
+
+            Current++;
+            WhenReleased?.Invoke(sender, new ReleaseEventArgs(consumer));
+            return true;
         }
-
-        Current++;
-
-        Available?.Invoke(sender, new AvailableEventArgs());
     }
 
     public string Status => $"{Nominal - Current}/{Nominal}";

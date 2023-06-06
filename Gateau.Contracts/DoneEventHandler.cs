@@ -6,3 +6,10 @@ public record DoneEventArgs(IOperation DoneOperation)
 {
 
 }
+
+public delegate void StartedEventHandler(object sender, StartedEventArgs e);
+
+public record StartedEventArgs(IOperation StartedOperation)
+{
+
+}

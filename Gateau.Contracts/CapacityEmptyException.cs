@@ -1,6 +1,6 @@
-﻿namespace GateauKata;
-
-public class CapacityEmptyException : Exception
-{
-
-}
+﻿// namespace GateauKata;
+//
+// public class CapacityEmptyException : Exception
+// {
+//
+// }

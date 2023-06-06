@@ -1,70 +1,81 @@
-﻿namespace GateauKata;
+﻿using System.Reflection.Emit;
+
+namespace GateauKata;
 
 public class PieOperation : IOperation {
     public PieOperation(
         IPie pie,
+
         ICapacity capacity,
-        string START,
-        string DONE,
-        int durationSeconds, 
-        ILogger logger,
-        Action done
+        double durationSeconds
         )
     {
-        Target = pie;
+        this.pie = pie;
+
         Capacity = capacity;
-        capacity.Available += (sender, args) =>
+
+        void WhenReleased(object sender, ReleaseEventArgs args)
         {
-            if (!IsStarted) Start(this);
-        };
-        this.START = START;
-        this.DONE = DONE;
+            var started = Start(sender);
+            if (started)
+            {
+                capacity.WhenReleased -= WhenReleased;
+            }
+            
+        }
+
+        capacity.WhenReleased += WhenReleased;
+
         Duration = new Duration(durationSeconds);
-        Logger = logger;
-        Done = done;
         IsStarted = false;
     }
-
-    public IPrintable Target { get; init; }
+    
+    private IPie pie { get; init; }
     private ICapacity Capacity { get; init; }
-    public string START { get; init; }
-    public string DONE { get; init; }
     public IDuration Duration { get; init; }
-    private ILogger Logger { get; init; }
-    public Action Done { get; init; } 
     public bool IsStarted { get; private set; }
 
+    public event StartedEventHandler WhenStarted;
     public event DoneEventHandler WhenDone;
 
     public bool Start(object sender)
     {
-        if (IsStarted)
-        {
-            throw new OperationException(
-                "already started");
-        }
+        // lock (this)
+        // {
+            if (IsStarted)
+            {
+                // throw new OperationException(
+                //     "already started");
 
-        if (!Capacity.Consume(this))
-        {
-            return false;
-        }
-        
-        IsStarted = true;
+                return true;
+            }
+
+            if (!Capacity.Consume(this, pie))
+            {
+                return false;
+            }
+
+            IsStarted = true;
+        // }
+
         DoIt(sender);
         return true;
     }
 
     public async Task DoIt(object sender)
     {
-        Logger.log($"{Target.Label}: {START}");
+        WhenStarted?.Invoke(sender, new StartedEventArgs(this));
 
+        //
+        //
         await Task.Delay(Duration.milliSeconds);
+        //
+        //
 
-        //Logger.log($"{Target.Label}: {DONE}");
-        Capacity.Release(this);
-
-        Done();
+        Capacity.Release(this, pie);
         WhenDone?.Invoke(sender, new DoneEventArgs(this));
     }
 
+    public override string ToString()
+        => $"{pie.Label} {pie.padStatus}";
 }

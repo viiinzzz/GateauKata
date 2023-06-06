@@ -2,6 +2,6 @@
 
 public interface IDuration
 {
-    int seconds { get; }
+    double seconds { get; }
     int milliSeconds { get; }
 }

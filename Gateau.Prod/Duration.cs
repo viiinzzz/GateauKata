@@ -2,11 +2,11 @@
 
 public class Duration : IDuration
 {
-    public Duration(int seconds)
+    public Duration(double seconds)
     {
         this.seconds = seconds;
     }
 
-    public int seconds { get; init; }
-    public int milliSeconds => seconds * 1000;
+    public double seconds { get; init; }
+    public int milliSeconds => (int)Math.Round(seconds * 1000);
 }

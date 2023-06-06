@@ -8,8 +8,9 @@ public interface ICapacity : IStatus
     bool IsAvailable { get; }
     bool IsFull { get; }
 
-    bool Consume(object sender);
-    void Release(object sender);
+    bool Consume(object sender, IStatus consumer);
+    bool Release(object sender, IStatus consumer);
 
-    event AvailableEventHandler Available;
+    event ConsumeEventHandler WhenConsumed;
+    event ReleaseEventHandler WhenReleased;
 }

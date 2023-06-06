@@ -1,45 +1,62 @@
-﻿namespace GateauKata;
+﻿using System.Diagnostics;
+
+namespace GateauKata;
 
 public class Prod
 {
     public static async Task Main(string[] args)
     {
-        Console.Out.WriteLine("==GateauKata=======");
-
-        int prepareCapacityNominal = 3,
-            bakeCapacityNominal = 4,
-            wrapCapacityNominal = 2,
-            pieTodoCount = 100;
-
+        Debug.WriteLine("==GateauKata=======");
+        
         var me = new Cook(
-            prepareCapacityNominal,
-            bakeCapacityNominal,
-            wrapCapacityNominal,
-            pieTodoCount
+           3, 0.2,
+            4, 0.3,
+            2, 0.1,
+            20
             );
 
-        Console.WriteLine("Start working...");
-        me.Work();
+        Debug.WriteLine("Start working...");
+        var work = me.Work();
 
-        int secondLapse = 0;
+        double secondLapse = 0;
         var timestamp = () =>
         {
-            var s = secondLapse % 60;
-            var m = secondLapse / 60;
+            var s_int = (int)Math.Round(secondLapse);
+            var s = s_int % 60;
+            var m = s_int / 60;
             return $"{m:00}:{s:00}";
         };
 
-        var printStatus = () => 
-            Console.WriteLine($"[{timestamp()}] {me.Status}");
+        var printStatus = () =>
+        {
+            var doing = me.DoingPies;
+            var doingStatus = doing.Count == 0 
+                ? "none"
+                : doing
+                    .Select(pie => $"#{pie.orderReference:00} {pie.Status}")
+                    .Aggregate((x, y) => $"{x} {y}");
 
-        while (me.HasWork)
+            Debug.WriteLine(@$"
+[{timestamp()}] {me.Status}
+            {doingStatus}
+");
+        };
+
+        double refreshSeconds = 1.0;
+        int s_ms = (int)Math.Round(refreshSeconds * 1000);
+        while (!work.IsCompleted)
         {
             printStatus();
-            await Task.Delay(10000);
-            secondLapse += 10;
+            await Task.Delay(s_ms);
+            secondLapse += refreshSeconds;
         }
 
         printStatus();
-        Console.WriteLine("All done.");
+        Debug.WriteLine("All done.");
+
+//         Debug.WriteLine(@"
+// Cool down...");
+//         await Task.Delay(5000);
+//         printStatus();
     }
 }
