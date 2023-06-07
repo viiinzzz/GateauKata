@@ -1,81 +1,76 @@
-﻿using System.Buffers;
+﻿using Gateau.config;
 
 namespace GateauKata;
 
 public class Pie : IPie
 {
-    public int orderReference { get; init; }
-    public List<IOperation> Operations { get; init; }
-    public IPrintable Target { get; init; }
-    public IDuration Duration { get; init; }
-    public ILogger Logger { get; init; }
+    public int Id { get; init; }
 
-    public Pie(int orderReference, ICook cook)
+    private PieStatus _status;
+    public PieStatus Status
     {
-        this.orderReference = orderReference;
-        Target = this;
-        Logger = cook;
+        get => _status;
+        set => Transition(value);
+    }
 
-        var Wrap = new PieOperation(
-            this,
-            cook.wrapCapacity,
-            "............................WRAP📦",
-            "..............................WRAP📦",
-            1,
-            cook,
-            () =>
+    private readonly IPieConfig _config;
+    private readonly ILogger _logger;
+
+    public Pie(int id, IPieConfig config, ILogger logger)
+    {
+        Id = id;
+        _status = PieStatus.NotStarted;
+        _config = config;
+        _logger = logger;
+    }
+
+    private static (PieStatus from, PieStatus to)[] authorizedTransitions = {
+
+        (PieStatus.NotStarted, PieStatus.Started),
+        (PieStatus.Started, PieStatus.Preparing),
+        (PieStatus.Preparing, PieStatus.Prepared),
+        (PieStatus.Prepared, PieStatus.Baking),
+        (PieStatus.Baking, PieStatus.Baked),
+        (PieStatus.Baked, PieStatus.Wrapping),
+        (PieStatus.Wrapping, PieStatus.Wrapped),
+        (PieStatus.Wrapped, PieStatus.Ready),
+    };
+
+    public void Transition(PieStatus to)
+    {
+        var from = _status;
+
+        foreach (var authorizedTransition in authorizedTransitions)
+        {
+            if ((from, to) == authorizedTransition)
             {
-                Logger.log($"{Target.Label}: .......................................DONE🚲");
-                WhenDone?.Invoke(this, new DoneEventArgs(this));
-            });
+                _status = to;
+                _logger.log($"{Label} {padStatus}");
+                return;
+            }
+        }
 
-        var Bake = new PieOperation(
-            this,
-            cook.bakeCapacity,
-            "...................BAKE♨️",
-            DONE: ".....................BAKE♨️",
-            3,
-            cook,
-            () => Wrap.Start(this)
-        );
-
-        var Prepare = new PieOperation(
-            this,
-            cook.prepareCapacity,
-            "..........PREP🥣",
-            DONE: "............PREP🥣",
-            2,
-            cook,
-            () => Bake.Start(this)
-
-        );
-
-        Operations = new (new[] {
-            Prepare, 
-            Bake, 
-            Wrap
-        });
-
-        Duration = new Duration(
-            Operations.Sum(op => op.Duration.seconds));
+        throw new Exception($"${Label} Invalid transition ${from}->${to} currently ${_status}");
     }
 
-    public bool Start(object sender)
-    {
-        Logger.log($"{Target.Label}: START🎬");
+    public string Label => $"#{Id:00}";
 
-        return Operations.FirstOrDefault()?.Start(sender)
-               ?? false;
-    }
+    public override string ToString() => $"{Label} {padStatus}";
 
-    public bool IsStarted => 
-        Operations.FirstOrDefault()?.IsStarted
-        ?? false;
+    public string padStatus => pad(Status);
 
-    public Action Done { get; init; }
-
-    public event DoneEventHandler? WhenDone;
-
-    public string Label => $"Pie#{orderReference:00}";
-    public override string ToString() => Label;
+    public static string pad(PieStatus status)
+        => status switch
+        {
+            PieStatus.NotStarted => "..🔴",
+            PieStatus.Started => "  🔴",
+            PieStatus.Preparing => "  ..🥣",
+            PieStatus.Prepared => "    🥣",
+            PieStatus.Baking => "              ..♨️",
+            PieStatus.Baked => "                ♨️",
+            PieStatus.Wrapping => "                        ..📦",
+            PieStatus.Wrapped => "                          📦",
+            PieStatus.Ready => "                                      🏁",
+            _ => "??",
+        };
 }
