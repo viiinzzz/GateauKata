@@ -1,8 +1,10 @@
 ﻿namespace GateauKata;
 
-public interface IPie : IPrintable, IOperation, IStatus
+public interface IPie
 {
-    int orderReference { get; init; }
+    int Id { get; init; }
+    PieStatus Status { get; set; }
+    string Label { get; }
     string padStatus { get; }
-
+    void Transition(PieStatus to);
 }

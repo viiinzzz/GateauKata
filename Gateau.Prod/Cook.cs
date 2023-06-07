@@ -1,128 +1,327 @@
 ﻿using System.Collections.Concurrent;
-using System.Diagnostics;
+using Gateau.config;
 
 namespace GateauKata;
 
-public class Cook : ICook, ILogger
+public class Cook
 {
-    public Cook(
-        int prepareCapacityNominal, double preparationSeconds, 
-        int bakeCapacityNominal, double bakeSeconds,
-        int wrapCapacityNominal, double wrapSeconds,
-        int pieTodoCount
-        )
+    private readonly ICookConfig _config;
+    private readonly ILogger _logger;
+
+    private int _prepareRetryDelay;
+    private int _bakeRetryDelay;
+    private int _wrapRetryDelay;
+
+    private int _prepareStartDelay;
+    private int _bakeStartDelay;
+    private int _wrapStartDelay;
+
+    private int _makeBestDelay;
+
+
+    public Cook(ICookConfig config, ILogger logger)
     {
-        PieConfig = new PieConfig(preparationSeconds, bakeSeconds, wrapSeconds);
-        PieTodoCount = pieTodoCount;
+        _config = config;
+        _logger = logger;
 
-        PrepareCapacity = new Capacity(prepareCapacityNominal);
-        BakeCapacity = new Capacity(bakeCapacityNominal);
-        WrapCapacity = new Capacity(wrapCapacityNominal);
+        _prepareRetryDelay = (int)_config.PieConfig.PrepareSeconds * 1000 / _config.PrepareCapacity;
+        _bakeRetryDelay = (int)_config.PieConfig.BakeSeconds * 1000 / _config.BakeCapacity;
+        _wrapRetryDelay = (int)_config.PieConfig.WrapSeconds * 1000 / _config.WrapCapacity;
 
-        // PrepareCapacity.WhenConsumed += (sender, args) => log($"       {Pie.pad(PieStatus.Prepared)}{PrepareCapacity.Status} -1  {args.consumer}");
-        PrepareCapacity.WhenReleased += (sender, args) => log($"       {Pie.pad(PieStatus.Prepared)}{PrepareCapacity.Status} +1  {args.consumer}");
-        // BakeCapacity.WhenConsumed += (sender, args) => log($"       {Pie.pad(PieStatus.Baked)}{BakeCapacity.Status} -1  {args.consumer}");
-        BakeCapacity.WhenReleased += (sender, args) => log($"       {Pie.pad(PieStatus.Baked)}{BakeCapacity.Status} +1  {args.consumer}");
-        // WrapCapacity.WhenConsumed += (sender, args) => log($"       {Pie.pad(PieStatus.Wrapped)}{WrapCapacity.Status} -1  {args.consumer}");
-        WrapCapacity.WhenReleased += (sender, args) => log($"       {Pie.pad(PieStatus.Wrapped)}{WrapCapacity.Status} +1  {args.consumer}");
+        _prepareStartDelay = 100;
+        _bakeStartDelay = _prepareStartDelay + (int)_config.PieConfig.PrepareSeconds * 1000;
+        _wrapStartDelay = _prepareStartDelay + (int)_config.PieConfig.PrepareSeconds * 1000;
+
+        _makeBestDelay = (int)((_config.PieConfig.PrepareSeconds
+                         + _config.PieConfig.BakeSeconds
+                         + _config.PieConfig.WrapSeconds) * 1000);
+
+        _logger.log(@$"
+Je suis le maître patissier 👨‍🍳
+
+🥣   Je peux préparer {_config.PrepareCapacity} gâteaux en même temps
+♨️    Je peux cuire {_config.BakeCapacity} gâteaux en même temps
+📦   Je peux emballer {_config.WrapCapacity} gâteaux en même temps
+
+Un gâteau est prêt lorsqu'il a terminé ces 3 étapes
+
+🥣   préparation : durée {Math.Round(_config.PieConfig.PrepareSeconds, 1)} secondes
+♨️    cuisson : durée {Math.Round(_config.PieConfig.BakeSeconds, 1)} secondes
+📦   emballage : durée {Math.Round(_config.PieConfig.WrapSeconds, 1)} secondes
+");
     }
 
-    public string Status => 
-  $"   🥣{PrepareCapacity.Status}"
-+ $"  ♨️{BakeCapacity.Status}"
-+ $" 📦{WrapCapacity.Status}"
-+ $" 🏁{_doneCount}/{PieTodoCount}";
-
-    public ICapacity PrepareCapacity { get; init; }
-    public ICapacity BakeCapacity { get; init; }
-    public ICapacity WrapCapacity { get; init; }
-
-    public IPieConfig PieConfig { get; init; }
-    public int PieTodoCount { get; init; }
-
-
-    private readonly ConcurrentDictionary<int, IPie> _doing = new();
-    public List<IPie> DoingPies => 
-        _doing
-            .Select(kv => kv.Value)
+readonly ConcurrentDictionary<int, IPie> _doingPies = new();
+    public List<IPie> DoingPies
+        => _doingPies
+            .Select(kv=> kv.Value)
             .ToList();
 
-
-    private bool _hasWork = false;
-    public bool HasWork => _hasWork;
-    private int _enqueueCount = 0;
-    private int _doneCount = 0;
-
-    public async Task Work()
+    public async Task MakePies(int pieTodoCount)
     {
-        _hasWork = true;
-        _doneCount = 0;
+        _logger.log(@$"
+J'ai reçu une commande pour {pieTodoCount} gâteaux 🥧
+");
 
-        Func<int> enqueue1 = () =>
+        BlockingCollection<IPie> prepare = new(_config.PrepareCapacity);
+        BlockingCollection<IPie> bake = new(_config.BakeCapacity);
+        BlockingCollection<IPie> wrap = new(_config.WrapCapacity);
+
+        Task feedPrepare = Task.Run(async () =>
         {
-            var orderReference = _enqueueCount++;
-            var pie = new Pie(orderReference, this);
-
-            void WhenPieDone(object sender, DoneEventArgs args)
+            for (int id = 0; id < pieTodoCount; id++)
             {
-                var donePie = args.DoneOperation as Pie;
-                if (donePie == null)
+                var pie = new Pie(id, _config.PieConfig, _logger);
+                _doingPies.AddOrUpdate(id, pie, (_, _) => pie);
+
+                do
                 {
-                    return;
+                    try
+                    {
+                        prepare.Add(pie);
+                        pie.Status = PieStatus.Started;
+
+                        break;
+                    }
+                    catch (InvalidOperationException)
+                    {
+                        _logger.log("prepare max capacity reached.");
+                        await Task.Delay(_prepareRetryDelay);
+                    }
+                } while (true);
+            }
+            
+            prepare.CompleteAdding();
+        });
+
+        int preparedPieCount = 0;
+        Task consumePrepare = Task.Run(async () =>
+        {
+            await Task.Delay(_prepareStartDelay);
+
+            while (true)
+            {
+                bool nomore = false;
+
+                List<IPie> piesToPrepare = new();
+                for (int k = 0; k < _config.PrepareCapacity; k++)
+                {
+                    try
+                    {
+                        var pieToPrepare = prepare.Take();
+                        piesToPrepare.Add(pieToPrepare);
+                    }
+                    catch (InvalidOperationException)
+                    {
+                        nomore = true;
+                        break;
+                    }
                 }
 
-                bool disposed = donePie.Disposing();
-                if (!disposed)
+                var preparedPies = await Prepare(piesToPrepare);
+                preparedPieCount += preparedPies.Length;
+
+                do
                 {
-                    return;
+                    try
+                    {
+                        foreach (var preparedPie in preparedPies)
+                        {
+                            bake.Add(preparedPie);
+                        }
+
+                        if (preparedPieCount >= pieTodoCount)
+                        {
+                            bake.CompleteAdding();
+                        }
+
+                        break;
+                    }
+                    catch (InvalidOperationException)
+                    {
+                        _logger.log("bake max capacity reached.");
+                        await Task.Delay(_bakeRetryDelay);
+                    }
+                } while (true);
+
+                if (nomore)
+                {
+                    break;
+                }
+            }
+        });
+
+        int bakedPieCount = 0;
+        Task consumeBake = Task.Run(async () =>
+        {
+            await Task.Delay(_bakeStartDelay);
+            
+            while (true)
+            {
+                bool nomore = false;
+                
+                List<IPie> piesToBake = new();
+                for (int k = 0; k < _config.BakeCapacity; k++)
+                {
+                    try {
+                        var pieToBake = bake.Take();
+                        piesToBake.Add(pieToBake);
+                    }
+                    catch (InvalidOperationException)
+                    {
+                        nomore = true;
+                        break;
+                    }
                 }
 
-                var key = donePie.orderReference;
-                _doing.Remove(key, out _);
-                donePie.WhenDone -= WhenPieDone;
-                _doneCount++;
+                var bakedPies = await Bake(piesToBake);
+                bakedPieCount += bakedPies.Length;
+                do
+                {
+                    try
+                    {
+                        foreach (var bakedPie in bakedPies)
+                        {
+                            wrap.Add(bakedPie);
+                        }
+
+                        if (bakedPieCount >= pieTodoCount)
+                        {
+                            wrap.CompleteAdding();
+                        }
+
+                        break;
+                    }
+                    catch (InvalidOperationException)
+                    {
+                        _logger.log("wrap max capacity reached.");
+                        await Task.Delay(_wrapRetryDelay);
+                    }
+                } while (true);
+
+
+                if (nomore)
+                {
+                    break;
+                }
             }
-            pie.WhenDone += WhenPieDone;
+        });
 
-            _doing.AddOrUpdate(orderReference, _ => pie, (_, _) => pie);
-            pie.Start(this);
-
-            return orderReference;
-        };
-
-
-        while (_enqueueCount < PieTodoCount)
+        int wrappedPieCount = 0;
+        int readyPieCount = 0;
+        Task consumeWrap = Task.Run(async () =>
         {
-            while (_doing.Count > 8)
+            await Task.Delay(_wrapStartDelay);
+            
+            while (true)
             {
-                Debug.WriteLine($"### doing {_doing.Count} full");
-                await Task.Delay(600);
+                bool nomore = false;
+
+                List<IPie> piesToWrap = new();
+                for (int k = 0; k < _config.WrapCapacity; k++)
+                {
+                    try
+                    {
+                        var pieToWrap = wrap.Take();
+                        piesToWrap.Add(pieToWrap);
+                    }
+                    catch (InvalidOperationException)
+                    {
+                        nomore = true;
+                        break;
+                    }
+                }
+
+                var wrappedPies = await Wrap(piesToWrap);
+                wrappedPieCount += wrappedPies.Length;
+
+                foreach (var wrappedPie in wrappedPies)
+                {
+                    bool ready = _doingPies.TryRemove(wrappedPie.Id, out _);
+                    if (ready)
+                    {
+                        wrappedPie.Status = PieStatus.Ready;
+                        readyPieCount++;
+                    }
+                }
+
+                if (nomore)
+                {
+                    break;
+                }
             }
+        });
 
-            var orderReference = enqueue1();
-            Debug.WriteLine($"### queue #{orderReference:00}");
-        }
+        Action logStatus = () => _logger.log(""
+ + $"        🥣{preparedPieCount} {prepare.Count}/{_config.PrepareCapacity}"
+ + $"  ♨️{bakedPieCount:###} {bake.Count}/{_config.BakeCapacity}"
+ + $"  📦{wrappedPieCount:###} {wrap.Count}/{_config.WrapCapacity}"
+ + $"  🏁{readyPieCount:###}/{pieTodoCount:###}"
+        );
 
-
-        while (_doing.Count > 0)
+        Task monitor = Task.Run(async () =>
         {
-            Debug.WriteLine($"### doing " + _doing.Count);
-            await Task.Delay(1000);
-        }
+            while (true)
+            {
+                logStatus();
+                var dt = _makeBestDelay * pieTodoCount * 5 / 100;
+                await Task.Delay(dt);
+            }
+        });
 
-        _hasWork = false;
+        var work = Task.WhenAll(
+            feedPrepare, 
+            consumePrepare,
+            consumeBake, 
+            consumeWrap);
+
+        await Task.WhenAny(work, monitor);
+        logStatus();
     }
 
 
-    public void log(string message)
-    {
-        // if (!message.Contains("Pie#01"))
-        // {
-        //     return;
-        // }
 
-        Debug.WriteLine(message);
+
+    public async Task<IPie[]> Prepare(IEnumerable<IPie> pies)
+    {
+        var payload = pies as IPie[] ?? pies.ToArray();
+        if (!payload.Any()) return Array.Empty<IPie>();
+
+        foreach (var pie in payload) pie.Status = PieStatus.Preparing;
+
+        _logger.log($"🥣 Je prépare les gâteaux {payload.Select(pie => pie.Label).Aggregate((x, y) => x + " " + y)}");
+        await Task.Delay((int)_config.PieConfig.PrepareSeconds * 1000);
+
+        foreach (var pie in payload) pie.Status = PieStatus.Prepared;
+        return payload;
     }
-    
+
+    public async Task<IPie[]> Bake(IEnumerable<IPie> pies)
+    {
+        var payload = pies as IPie[] ?? pies.ToArray();
+        if (!payload.Any()) return Array.Empty<IPie>();
+
+        foreach (var pie in payload) pie.Status = PieStatus.Baking;
+
+        _logger.log($"♨️ Je cuis les gâteaux {payload.Select(pie => pie.Label).Aggregate((x, y) => x + " " + y)}");
+        await Task.Delay((int)_config.PieConfig.PrepareSeconds * 1000);
+
+        foreach (var pie in payload) pie.Status = PieStatus.Baked;
+        return payload;
+    }
+
+    public async Task<IPie[]> Wrap(IEnumerable<IPie> pies)
+    {
+        var payload = pies as IPie[] ?? pies.ToArray();
+        if (!payload.Any()) return Array.Empty<IPie>();
+
+        foreach (var pie in payload) pie.Status = PieStatus.Wrapping;
+
+        _logger.log($"📦 J'emballe les gâteaux {payload.Select(pie => pie.Label).Aggregate((x, y) => x + " " + y)}");
+        await Task.Delay((int)_config.PieConfig.PrepareSeconds * 1000);
+
+        foreach (var pie in payload) pie.Status = PieStatus.Wrapped;
+        return payload;
+    }
+
 }
-

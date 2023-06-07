@@ -7,7 +7,7 @@ Un gâteau est prêt lorsqu'il a terminé ces 3 étapes :
 
     préparation : durée 2 secondes
     cuisson : durée 3 secondes
-    emballage : durée 1 seco
+    emballage : durée 1 secondes
     
 Les règles :
 ·   Je peux préparer 3 gâteaux en même temps
